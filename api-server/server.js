@@ -196,110 +196,113 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
 
 // Route pour créer une réservation
 app.post('/api/reservations', authenticateUser, async (req, res) => {
-  try {
-    const userId = req.user.uid;
-    console.log('Création de réservation - Données reçues:', {
-      userId,
-      body: req.body
-    });
-
-    const { serviceId, providerId, date, startTime, endTime, totalPrice } = req.body;
-
-    // Validation des données
-    if (!serviceId || !providerId) {
-      console.log('Validation échouée - Données manquantes:', { serviceId, providerId });
-      return res.status(400).json({
-        success: false,
-        error: 'serviceId et providerId sont requis'
-      });
-    }
-
-    // Vérifier si le service existe
     try {
-      const serviceDoc = await admin.firestore()
-        .collection('services')
-        .doc(serviceId.trim())
-        .get();
+        console.log(' Requête de réservation reçue');
+        console.log('Données de la requête:', JSON.stringify(req.body, null, 2));
+        console.log('Utilisateur authentifié:', req.user.uid);
 
-      if (!serviceDoc.exists) {
-        console.log('Service non trouvé:', serviceId);
-        return res.status(404).json({
-          success: false,
-          error: 'Service non trouvé'
+        // Validation des données d'entrée
+        const { 
+            serviceId, 
+            providerId, 
+            date, 
+            startTime, 
+            endTime, 
+            totalPrice 
+        } = req.body;
+
+        // Vérifications de base
+        if (!serviceId || !providerId || !date || !startTime || !endTime) {
+            console.error(' Données de réservation incomplètes');
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Données de réservation incomplètes' 
+            });
+        }
+
+        // Vérification de l'existence du service
+        const serviceRef = admin.firestore().collection('services').doc(serviceId);
+        const serviceDoc = await serviceRef.get();
+
+        if (!serviceDoc.exists) {
+            console.error(` Service non trouvé: ${serviceId}`);
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Service non trouvé' 
+            });
+        }
+
+        // Vérification des disponibilités
+        const reservationsRef = admin.firestore().collection('reservations');
+        const conflictQuery = await reservationsRef
+            .where('serviceId', '==', serviceId)
+            .where('date', '==', date)
+            .where('status', '!=', 'cancelled')
+            .get();
+
+        const conflictingReservations = conflictQuery.docs.filter(doc => {
+            const reservation = doc.data();
+            return !(
+                (startTime >= reservation.endTime) || 
+                (endTime <= reservation.startTime)
+            );
         });
-      }
 
-      console.log('Service trouvé:', serviceDoc.data());
+        if (conflictingReservations.length > 0) {
+            console.error(' Créneau déjà réservé');
+            return res.status(409).json({ 
+                success: false, 
+                error: 'Créneau déjà réservé' 
+            });
+        }
+
+        // Création de la réservation
+        const newReservationRef = reservationsRef.doc();
+        const reservationData = {
+            id: newReservationRef.id,
+            userId: req.user.uid,
+            serviceId,
+            providerId,
+            date,
+            startTime,
+            endTime,
+            totalPrice: Number(totalPrice) || 0,
+            status: 'pending',
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        await newReservationRef.set(reservationData);
+
+        console.log(` Réservation créée avec succès: ${newReservationRef.id}`);
+
+        res.status(201).json({ 
+            success: true, 
+            message: 'Réservation créée avec succès',
+            reservation: reservationData
+        });
+
     } catch (error) {
-      console.error('Erreur lors de la vérification du service:', error);
-      throw error;
+        console.error(' Erreur lors de la création de la réservation:', error);
+        
+        // Gestion des différents types d'erreurs
+        if (error.code === 'permission-denied') {
+            res.status(403).json({ 
+                success: false, 
+                error: 'Accès non autorisé' 
+            });
+        } else if (error.code === 'not-found') {
+            res.status(404).json({ 
+                success: false, 
+                error: 'Ressource non trouvée' 
+            });
+        } else {
+            res.status(500).json({ 
+                success: false, 
+                error: 'Erreur interne du serveur',
+                details: error.message 
+            });
+        }
     }
-
-    // Créer la réservation
-    console.log('Création de la réservation avec les données:', {
-      clientId: userId,
-      serviceId: serviceId.trim(),
-      providerId: providerId.trim(),
-      date,
-      startTime,
-      endTime,
-      totalPrice
-    });
-
-    const reservationData = {
-      clientId: userId,
-      serviceId: serviceId.trim(),
-      providerId: providerId.trim(),
-      date: date || '',
-      startTime: startTime || '',
-      endTime: endTime || '',
-      totalPrice: Number(totalPrice) || 0,
-      status: 'pending',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    };
-
-    const docRef = await admin.firestore()
-      .collection('reservations')
-      .add(reservationData);
-
-    console.log('Réservation créée avec succès:', {
-      id: docRef.id,
-      ...reservationData
-    });
-
-    res.status(201).json({
-      success: true,
-      reservationId: docRef.id,
-      message: 'Réservation créée avec succès'
-    });
-  } catch (error) {
-    console.error('Erreur détaillée lors de la création de la réservation:', {
-      error: error.message,
-      stack: error.stack,
-      code: error.code
-    });
-    
-    let errorMessage = 'Erreur lors de la création de la réservation';
-    let statusCode = 500;
-
-    if (error.code === 'permission-denied') {
-      errorMessage = 'Accès non autorisé à la base de données';
-      statusCode = 403;
-    } else if (error.code === 'not-found') {
-      errorMessage = 'Service ou ressource non trouvé';
-      statusCode = 404;
-    } else if (error.code === 'resource-exhausted') {
-      errorMessage = 'Limite de requêtes atteinte, veuillez réessayer plus tard';
-      statusCode = 429;
-    }
-    
-    res.status(statusCode).json({ 
-      success: false, 
-      error: errorMessage,
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
 });
 
 // Middleware de gestion des erreurs globales
