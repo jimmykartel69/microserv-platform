@@ -78,28 +78,55 @@ app.get('/api/health', (req, res) => {
 app.get('/api/reservations', authenticateUser, async (req, res) => {
   try {
     const userId = req.user.uid;
+    console.log('Récupération des réservations pour userId:', userId);
     
-    const reservationsSnapshot = await admin.firestore()
+    // Ajouter un timeout de 25 secondes pour Firestore
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Timeout Firestore')), 25000)
+    );
+
+    const queryPromise = admin.firestore()
       .collection('reservations')
-      .where('userId', '==', userId)
+      .where('clientId', '==', userId)  // Utiliser clientId au lieu de userId
       .orderBy('createdAt', 'desc')
       .get();
 
-    const reservations = reservationsSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const reservationsSnapshot = await Promise.race([queryPromise, timeoutPromise]);
 
+    const reservations = reservationsSnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        clientId: data.clientId || '',
+        date: data.date || '',
+        startTime: data.startTime || '',
+        endTime: data.endTime || '',
+        providerId: data.providerId || '',
+        serviceId: data.serviceId || '',
+        status: data.status || 'pending',
+        totalPrice: data.totalPrice || 0,
+        createdAt: data.createdAt ? data.createdAt.toDate() : null,
+        updatedAt: data.updatedAt ? data.updatedAt.toDate() : null
+      };
+    });
+
+    console.log(`${reservations.length} réservations trouvées`);
+    
     res.json({
       success: true,
       reservations,
       message: 'Réservations récupérées avec succès'
     });
   } catch (error) {
-    console.error('Erreur:', error);
-    res.status(500).json({ 
+    console.error('Erreur lors de la récupération des réservations:', error);
+    
+    const errorMessage = error.message === 'Timeout Firestore'
+      ? 'Le service de base de données met trop de temps à répondre'
+      : 'Erreur lors de la récupération des réservations';
+    
+    res.status(error.message === 'Timeout Firestore' ? 504 : 500).json({ 
       success: false, 
-      error: 'Erreur serveur' 
+      error: errorMessage
     });
   }
 });
