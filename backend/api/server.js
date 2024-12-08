@@ -19,7 +19,7 @@ const app = express();
 app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? 'https://votre-domaine.com' 
+    ? 'https://microserv.entrepixel.fr/' 
     : 'http://localhost:3000',
   credentials: true
 }));
