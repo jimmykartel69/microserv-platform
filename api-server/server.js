@@ -87,35 +87,69 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
 
     const queryPromise = admin.firestore()
       .collection('reservations')
-      .where('clientId', '==', userId)  // Utiliser clientId au lieu de userId
+      .where('clientId', '==', userId.trim())  // Assurez-vous que l'ID est trimé
       .orderBy('createdAt', 'desc')
       .get();
 
     const reservationsSnapshot = await Promise.race([queryPromise, timeoutPromise]);
 
-    const reservations = reservationsSnapshot.docs.map(doc => {
+    // Si aucune réservation n'est trouvée, retourner un tableau vide
+    if (reservationsSnapshot.empty) {
+      console.log('Aucune réservation trouvée pour l\'utilisateur:', userId);
+      return res.json({
+        success: true,
+        reservations: [],
+        message: 'Aucune réservation trouvée'
+      });
+    }
+
+    const reservations = await Promise.all(reservationsSnapshot.docs.map(async doc => {
       const data = doc.data();
+      
+      // Récupérer les informations du service si serviceId existe
+      let serviceInfo = {};
+      if (data.serviceId && data.serviceId.trim()) {
+        try {
+          const serviceDoc = await admin.firestore()
+            .collection('services')
+            .doc(data.serviceId.trim())
+            .get();
+          
+          if (serviceDoc.exists) {
+            const serviceData = serviceDoc.data();
+            serviceInfo = {
+              title: serviceData.title || '',
+              category: serviceData.category || '',
+              price: serviceData.price || 0
+            };
+          }
+        } catch (error) {
+          console.error('Erreur lors de la récupération du service:', error);
+        }
+      }
+
       return {
         id: doc.id,
-        clientId: data.clientId || '',
-        date: data.date || '',
-        startTime: data.startTime || '',
-        endTime: data.endTime || '',
-        providerId: data.providerId || '',
-        serviceId: data.serviceId || '',
+        clientId: (data.clientId || '').trim(),
+        date: (data.date || '').trim(),
+        startTime: (data.startTime || '').trim(),
+        endTime: (data.endTime || '').trim(),
+        providerId: (data.providerId || '').trim(),
+        serviceId: (data.serviceId || '').trim(),
         status: data.status || 'pending',
         totalPrice: data.totalPrice || 0,
         createdAt: data.createdAt ? data.createdAt.toDate() : null,
-        updatedAt: data.updatedAt ? data.updatedAt.toDate() : null
+        updatedAt: data.updatedAt ? data.updatedAt.toDate() : null,
+        service: serviceInfo
       };
-    });
+    }));
 
     console.log(`${reservations.length} réservations trouvées`);
     
     res.json({
       success: true,
       reservations,
-      message: 'Réservations récupérées avec succès'
+      message: reservations.length > 0 ? 'Réservations récupérées avec succès' : 'Aucune réservation trouvée'
     });
   } catch (error) {
     console.error('Erreur lors de la récupération des réservations:', error);
