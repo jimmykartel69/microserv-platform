@@ -44,12 +44,19 @@ const app = express();
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: '*', 
-  methods: ['GET', 'POST', 'DELETE', 'UPDATE', 'PUT', 'PATCH'],
+  origin: ['https://microserv.entrepixel.fr', 'http://localhost:3000'],
+  methods: ['GET', 'POST', 'DELETE', 'PUT', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Augmenter le timeout du serveur
+app.use((req, res, next) => {
+  res.setTimeout(120000); // 2 minutes
+  next();
+});
 
 // Middleware d'authentification
 const authenticateUser = async (req, res, next) => {
@@ -169,43 +176,57 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
 app.post('/api/reservations', authenticateUser, async (req, res) => {
   try {
     const userId = req.user.uid;
+    console.log('Création de réservation pour userId:', userId);
+    console.log('Données reçues:', req.body);
+
     const { serviceId, providerId, date, startTime, endTime, totalPrice } = req.body;
 
     // Validation des données
-    if (!serviceId || !providerId || !date || !startTime || !endTime) {
+    if (!serviceId || !providerId) {
       return res.status(400).json({
         success: false,
-        error: 'Données manquantes'
+        error: 'serviceId et providerId sont requis'
       });
     }
 
-    // Créer la réservation
-    const reservationRef = admin.firestore().collection('reservations').doc();
-    const reservationData = {
-      userId,
-      serviceId,
-      providerId,
-      date,
-      startTime,
-      endTime,
-      totalPrice,
-      status: 'pending',
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
-    };
+    // Créer la réservation avec un timeout de 60 secondes
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Timeout Firestore')), 60000)
+    );
 
-    await reservationRef.set(reservationData);
+    const createPromise = admin.firestore()
+      .collection('reservations')
+      .add({
+        clientId: userId,
+        serviceId: serviceId.trim(),
+        providerId: providerId.trim(),
+        date: date || '',
+        startTime: startTime || '',
+        endTime: endTime || '',
+        totalPrice: totalPrice || 0,
+        status: 'pending',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+    const docRef = await Promise.race([createPromise, timeoutPromise]);
+    console.log('Réservation créée avec ID:', docRef.id);
 
     res.status(201).json({
       success: true,
-      reservationId: reservationRef.id,
-      ...reservationData,
+      reservationId: docRef.id,
       message: 'Réservation créée avec succès'
     });
   } catch (error) {
-    console.error('Erreur:', error);
-    res.status(500).json({ 
+    console.error('Erreur lors de la création de la réservation:', error);
+    
+    const errorMessage = error.message === 'Timeout Firestore'
+      ? 'Le service de base de données met trop de temps à répondre'
+      : 'Erreur lors de la création de la réservation';
+    
+    res.status(error.message === 'Timeout Firestore' ? 504 : 500).json({ 
       success: false, 
-      error: 'Erreur serveur' 
+      error: errorMessage
     });
   }
 });
