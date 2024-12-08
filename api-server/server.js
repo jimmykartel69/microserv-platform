@@ -2,51 +2,61 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const admin = require('firebase-admin');
+const bodyParser = require('body-parser');
 require('dotenv').config();
 
-// Gestion robuste de la clé privée Firebase
-const privateKey = process.env.FIREBASE_PRIVATE_KEY 
-    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n').trim()
-    : undefined;
+// Gestion sécurisée de l'initialisation Firebase
+const initFirebaseAdmin = () => {
+    // Récupération des variables d'environnement
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY 
+        ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n').trim()
+        : undefined;
 
-// Validation de la configuration Firebase
-if (!process.env.FIREBASE_PROJECT_ID) {
-    console.error('ERREUR: FIREBASE_PROJECT_ID non défini');
-    process.exit(1);
-}
+    // Validation des variables
+    if (!projectId || !clientEmail || !privateKey) {
+        console.error('❌ Configuration Firebase incomplète');
+        console.error('Variables manquantes:', {
+            projectId: !!projectId,
+            clientEmail: !!clientEmail,
+            privateKey: !!privateKey
+        });
+        throw new Error('Configuration Firebase incomplète');
+    }
 
-if (!process.env.FIREBASE_CLIENT_EMAIL) {
-    console.error('ERREUR: FIREBASE_CLIENT_EMAIL non défini');
-    process.exit(1);
-}
+    // Configuration de Firebase Admin
+    const firebaseConfig = {
+        credential: admin.credential.cert({
+            projectId: projectId,
+            clientEmail: clientEmail,
+            privateKey: privateKey
+        }),
+        // Configuration de Firestore
+        databaseURL: `https://${projectId}.firebaseio.com`
+    };
 
-if (!privateKey) {
-    console.error('ERREUR: FIREBASE_PRIVATE_KEY non défini');
-    process.exit(1);
-}
+    try {
+        // Vérifier si Firebase est déjà initialisé
+        if (!admin.apps.length) {
+            admin.initializeApp(firebaseConfig);
+            console.log('✅ Firebase Admin initialisé avec succès');
+        }
 
-// Logs de débogage détaillés
-console.log('Configuration Firebase:');
-console.log('Project ID:', process.env.FIREBASE_PROJECT_ID);
-console.log('Client Email:', process.env.FIREBASE_CLIENT_EMAIL);
-console.log('Début de la clé privée:', privateKey.substring(0, 50) + '...');
-
-// Configuration de Firebase Admin
-const firebaseConfig = {
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: privateKey
+        // Retourner l'instance de Firestore
+        return admin.firestore();
+    } catch (error) {
+        console.error('❌ Erreur lors de l\'initialisation de Firebase Admin:', error);
+        throw error;
+    }
 };
 
+// Initialisation de Firebase
+let db;
 try {
-    admin.initializeApp({
-        credential: admin.credential.cert(firebaseConfig),
-        // Configuration de Firestore si nécessaire
-        // databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
-    });
-    console.log('✅ Firebase Admin initialisé avec succès');
+    db = initFirebaseAdmin();
 } catch (error) {
-    console.error('❌ Erreur lors de l\'initialisation de Firebase Admin:', error);
+    console.error('Impossible d\'initialiser Firebase:', error);
     process.exit(1);
 }
 
@@ -54,12 +64,18 @@ const app = express();
 
 // Middleware
 app.use(helmet());
-app.use(cors({
-  origin: ['https://microserv.entrepixel.fr', 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'DELETE', 'PUT', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
+const corsOptions = {
+    origin: [
+        'http://localhost:3000', 
+        'https://microserv.entrepixel.fr',
+        'https://microserv-api.onrender.com'
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+};
+app.use(cors(corsOptions));
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -71,31 +87,31 @@ app.use((req, res, next) => {
 
 // Middleware d'authentification
 const authenticateUser = async (req, res, next) => {
-  try {
-    console.log('Vérification de l\'authentification...');
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader?.startsWith('Bearer ')) {
-      console.log('Token manquant dans les headers');
-      return res.status(401).json({ error: 'Token manquant' });
-    }
-
-    const token = authHeader.split('Bearer ')[1];
-    console.log('Token reçu, vérification...');
-    
     try {
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      console.log('Token vérifié avec succès pour l\'utilisateur:', decodedToken.uid);
-      req.user = decodedToken;
-      next();
-    } catch (verifyError) {
-      console.error('Erreur lors de la vérification du token:', verifyError);
-      res.status(401).json({ error: 'Token invalide' });
+        console.log('🔐 Vérification de l\'authentification...');
+        const authHeader = req.headers.authorization;
+        
+        if (!authHeader?.startsWith('Bearer ')) {
+            console.log('❌ Token manquant dans les headers');
+            return res.status(401).json({ error: 'Token manquant' });
+        }
+
+        const token = authHeader.split('Bearer ')[1];
+        console.log('🔑 Token reçu, vérification...');
+        
+        try {
+            const decodedToken = await admin.auth().verifyIdToken(token);
+            console.log('✅ Token vérifié avec succès pour l\'utilisateur:', decodedToken.uid);
+            req.user = decodedToken;
+            next();
+        } catch (verifyError) {
+            console.error('❌ Erreur lors de la vérification du token:', verifyError);
+            res.status(401).json({ error: 'Token invalide' });
+        }
+    } catch (error) {
+        console.error('❌ Erreur d\'authentification:', error);
+        res.status(401).json({ error: 'Non autorisé' });
     }
-  } catch (error) {
-    console.error('Erreur d\'authentification:', error);
-    res.status(401).json({ error: 'Non autorisé' });
-  }
 };
 
 // Routes
@@ -110,7 +126,7 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
         console.log('Utilisateur authentifié:', req.user.uid);
 
         // Récupérer les réservations de l'utilisateur
-        const reservationsRef = admin.firestore().collection('reservations');
+        const reservationsRef = db.collection('reservations');
         const query = reservationsRef
             .where('userId', '==', req.user.uid)
             .orderBy('createdAt', 'desc');  // Trier par date de création décroissante
@@ -126,7 +142,7 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
             
             try {
                 // Récupérer les détails du service
-                const serviceRef = admin.firestore().collection('services').doc(reservationData.serviceId);
+                const serviceRef = db.collection('services').doc(reservationData.serviceId);
                 const serviceDoc = await serviceRef.get();
 
                 // Ajouter les détails du service à la réservation
@@ -201,7 +217,7 @@ app.post('/api/reservations', authenticateUser, async (req, res) => {
         }
 
         // Vérification de l'existence du service
-        const serviceRef = admin.firestore().collection('services').doc(serviceId);
+        const serviceRef = db.collection('services').doc(serviceId);
         const serviceDoc = await serviceRef.get();
 
         if (!serviceDoc.exists) {
@@ -213,7 +229,7 @@ app.post('/api/reservations', authenticateUser, async (req, res) => {
         }
 
         // Vérification des disponibilités
-        const reservationsRef = admin.firestore().collection('reservations');
+        const reservationsRef = db.collection('reservations');
         const conflictQuery = await reservationsRef
             .where('serviceId', '==', serviceId)
             .where('date', '==', date)
