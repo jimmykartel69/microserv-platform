@@ -4,21 +4,47 @@ const helmet = require('helmet');
 const admin = require('firebase-admin');
 require('dotenv').config();
 
+// Fonction pour formater correctement la clé privée
+const formatPrivateKey = (key) => {
+  if (!key) return null;
+  // Si la clé est déjà au bon format, la retourner telle quelle
+  if (key.includes('-----BEGIN PRIVATE KEY-----')) {
+    return key.replace(/\\n/g, '\n');
+  }
+  // Sinon, essayer de parser la clé JSON
+  try {
+    return JSON.parse(key).replace(/\\n/g, '\n');
+  } catch (e) {
+    // Si ce n'est pas du JSON, retourner la clé telle quelle
+    return key.replace(/\\n/g, '\n');
+  }
+};
+
 // Initialiser Firebase Admin
-admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
-  })
-});
+try {
+  const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
+  console.log('Initialisation de Firebase Admin...');
+  
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: privateKey
+    })
+  });
+  
+  console.log('Firebase Admin initialisé avec succès');
+} catch (error) {
+  console.error('Erreur lors de l\'initialisation de Firebase Admin:', error);
+  process.exit(1);
+}
 
 const app = express();
 
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: '*', // Autoriser toutes les origines pour le développement
+  origin: '*', 
   methods: ['GET', 'POST', 'DELETE', 'UPDATE', 'PUT', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
