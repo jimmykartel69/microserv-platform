@@ -18,9 +18,9 @@ const app = express();
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? 'https://votre-domaine.com' 
-    : 'http://localhost:3000',
+  origin: '*', // Autoriser toutes les origines pour le développement
+  methods: ['GET', 'POST', 'DELETE', 'UPDATE', 'PUT', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
 app.use(express.json());
