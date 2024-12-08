@@ -103,95 +103,75 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Route pour récupérer les réservations
+// Route pour récupérer les réservations de l'utilisateur
 app.get('/api/reservations', authenticateUser, async (req, res) => {
-  try {
-    const userId = req.user.uid;
-    console.log('Récupération des réservations pour userId:', userId);
-    
-    // Ajouter un timeout de 25 secondes pour Firestore
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Timeout Firestore')), 25000)
-    );
+    try {
+        console.log('🔍 Requête de récupération des réservations');
+        console.log('Utilisateur authentifié:', req.user.uid);
 
-    const queryPromise = admin.firestore()
-      .collection('reservations')
-      .where('clientId', '==', userId.trim())  // Assurez-vous que l'ID est trimé
-      .orderBy('createdAt', 'desc')
-      .get();
+        // Récupérer les réservations de l'utilisateur
+        const reservationsRef = admin.firestore().collection('reservations');
+        const query = reservationsRef
+            .where('userId', '==', req.user.uid)
+            .orderBy('createdAt', 'desc');  // Trier par date de création décroissante
 
-    const reservationsSnapshot = await Promise.race([queryPromise, timeoutPromise]);
+        const snapshot = await query.get();
 
-    // Si aucune réservation n'est trouvée, retourner un tableau vide
-    if (reservationsSnapshot.empty) {
-      console.log('Aucune réservation trouvée pour l\'utilisateur:', userId);
-      return res.json({
-        success: true,
-        reservations: [],
-        message: 'Aucune réservation trouvée'
-      });
-    }
+        // Tableau pour stocker les réservations avec les détails du service
+        const reservations = [];
 
-    const reservations = await Promise.all(reservationsSnapshot.docs.map(async doc => {
-      const data = doc.data();
-      
-      // Récupérer les informations du service si serviceId existe
-      let serviceInfo = {};
-      if (data.serviceId && data.serviceId.trim()) {
-        try {
-          const serviceDoc = await admin.firestore()
-            .collection('services')
-            .doc(data.serviceId.trim())
-            .get();
-          
-          if (serviceDoc.exists) {
-            const serviceData = serviceDoc.data();
-            serviceInfo = {
-              title: serviceData.title || '',
-              category: serviceData.category || '',
-              price: serviceData.price || 0
-            };
-          }
-        } catch (error) {
-          console.error('Erreur lors de la récupération du service:', error);
+        // Récupérer les détails de chaque service
+        for (const doc of snapshot.docs) {
+            const reservationData = doc.data();
+            
+            try {
+                // Récupérer les détails du service
+                const serviceRef = admin.firestore().collection('services').doc(reservationData.serviceId);
+                const serviceDoc = await serviceRef.get();
+
+                // Ajouter les détails du service à la réservation
+                reservations.push({
+                    id: doc.id,
+                    ...reservationData,
+                    service: serviceDoc.exists ? serviceDoc.data() : null
+                });
+            } catch (serviceError) {
+                console.warn(`⚠️ Impossible de récupérer le service pour la réservation ${doc.id}:`, serviceError);
+                
+                // Ajouter la réservation même si le service n'est pas récupéré
+                reservations.push({
+                    id: doc.id,
+                    ...reservationData,
+                    service: null
+                });
+            }
         }
-      }
 
-      return {
-        id: doc.id,
-        clientId: (data.clientId || '').trim(),
-        date: (data.date || '').trim(),
-        startTime: (data.startTime || '').trim(),
-        endTime: (data.endTime || '').trim(),
-        providerId: (data.providerId || '').trim(),
-        serviceId: (data.serviceId || '').trim(),
-        status: data.status || 'pending',
-        totalPrice: data.totalPrice || 0,
-        createdAt: data.createdAt ? data.createdAt.toDate() : null,
-        updatedAt: data.updatedAt ? data.updatedAt.toDate() : null,
-        service: serviceInfo
-      };
-    }));
+        console.log(`✅ Récupération de ${reservations.length} réservations`);
 
-    console.log(`${reservations.length} réservations trouvées`);
-    
-    res.json({
-      success: true,
-      reservations,
-      message: reservations.length > 0 ? 'Réservations récupérées avec succès' : 'Aucune réservation trouvée'
-    });
-  } catch (error) {
-    console.error('Erreur lors de la récupération des réservations:', error);
-    
-    const errorMessage = error.message === 'Timeout Firestore'
-      ? 'Le service de base de données met trop de temps à répondre'
-      : 'Erreur lors de la récupération des réservations';
-    
-    res.status(error.message === 'Timeout Firestore' ? 504 : 500).json({ 
-      success: false, 
-      error: errorMessage
-    });
-  }
+        res.status(200).json({
+            success: true,
+            message: 'Réservations récupérées avec succès',
+            reservations: reservations
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur lors de la récupération des réservations:', error);
+        
+        // Gestion des différents types d'erreurs
+        if (error.code === 'permission-denied') {
+            res.status(403).json({ 
+                success: false, 
+                error: 'Accès non autorisé' 
+            });
+        } else {
+            res.status(500).json({ 
+                success: false, 
+                error: 'Erreur interne du serveur',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
+        }
+    }
 });
 
 // Route pour créer une réservation
