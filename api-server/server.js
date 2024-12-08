@@ -4,39 +4,50 @@ const helmet = require('helmet');
 const admin = require('firebase-admin');
 require('dotenv').config();
 
-// Fonction pour formater correctement la clé privée
-const formatPrivateKey = (key) => {
-  if (!key) return null;
-  // Si la clé est déjà au bon format, la retourner telle quelle
-  if (key.includes('-----BEGIN PRIVATE KEY-----')) {
-    return key.replace(/\\n/g, '\n');
-  }
-  // Sinon, essayer de parser la clé JSON
-  try {
-    return JSON.parse(key).replace(/\\n/g, '\n');
-  } catch (e) {
-    // Si ce n'est pas du JSON, retourner la clé telle quelle
-    return key.replace(/\\n/g, '\n');
-  }
+// Gestion robuste de la clé privée Firebase
+const privateKey = process.env.FIREBASE_PRIVATE_KEY 
+    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n').trim()
+    : undefined;
+
+// Validation de la configuration Firebase
+if (!process.env.FIREBASE_PROJECT_ID) {
+    console.error('ERREUR: FIREBASE_PROJECT_ID non défini');
+    process.exit(1);
+}
+
+if (!process.env.FIREBASE_CLIENT_EMAIL) {
+    console.error('ERREUR: FIREBASE_CLIENT_EMAIL non défini');
+    process.exit(1);
+}
+
+if (!privateKey) {
+    console.error('ERREUR: FIREBASE_PRIVATE_KEY non défini');
+    process.exit(1);
+}
+
+// Logs de débogage détaillés
+console.log('Configuration Firebase:');
+console.log('Project ID:', process.env.FIREBASE_PROJECT_ID);
+console.log('Client Email:', process.env.FIREBASE_CLIENT_EMAIL);
+console.log('Début de la clé privée:', privateKey.substring(0, 50) + '...');
+
+// Configuration de Firebase Admin
+const firebaseConfig = {
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: privateKey
 };
 
-// Initialiser Firebase Admin
 try {
-  const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
-  console.log('Initialisation de Firebase Admin...');
-  
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: privateKey
-    })
-  });
-  
-  console.log('Firebase Admin initialisé avec succès');
+    admin.initializeApp({
+        credential: admin.credential.cert(firebaseConfig),
+        // Configuration de Firestore si nécessaire
+        // databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
+    });
+    console.log('✅ Firebase Admin initialisé avec succès');
 } catch (error) {
-  console.error('Erreur lors de l\'initialisation de Firebase Admin:', error);
-  process.exit(1);
+    console.error('❌ Erreur lors de l\'initialisation de Firebase Admin:', error);
+    process.exit(1);
 }
 
 const app = express();
