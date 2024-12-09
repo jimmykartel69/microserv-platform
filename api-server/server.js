@@ -14,6 +14,12 @@ const initFirebaseAdmin = () => {
         ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n').trim()
         : undefined;
 
+    // Log détaillé des variables d'environnement
+    console.log('🔍 Configuration Firebase:');
+    console.log('Project ID:', projectId ? 'Présent' : 'MANQUANT');
+    console.log('Client Email:', clientEmail ? 'Présent' : 'MANQUANT');
+    console.log('Private Key:', privateKey ? 'Présent (partiellement masqué)' : 'MANQUANT');
+
     // Validation des variables
     if (!projectId || !clientEmail || !privateKey) {
         console.error('❌ Configuration Firebase incomplète');
@@ -22,7 +28,7 @@ const initFirebaseAdmin = () => {
             clientEmail: !!clientEmail,
             privateKey: !!privateKey
         });
-        throw new Error('Configuration Firebase incomplète');
+        throw new Error('Configuration Firebase incomplète. Vérifiez les variables d\'environnement.');
     }
 
     // Configuration de Firebase Admin
@@ -44,9 +50,22 @@ const initFirebaseAdmin = () => {
         }
 
         // Retourner l'instance de Firestore
-        return admin.firestore();
+        const db = admin.firestore();
+        
+        // Test de connexion à Firestore
+        console.log('🔬 Test de connexion à Firestore...');
+        db.collection('test').get()
+            .then(() => console.log('✅ Connexion Firestore réussie'))
+            .catch(err => console.error('❌ Échec de la connexion Firestore:', err));
+
+        return db;
     } catch (error) {
         console.error('❌ Erreur lors de l\'initialisation de Firebase Admin:', error);
+        console.error('Détails de l\'erreur:', {
+            name: error.name,
+            message: error.message,
+            stack: error.stack
+        });
         throw error;
     }
 };
@@ -229,7 +248,7 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
             details: globalError.message
         });
     }
-});
+};
 
 // Route pour créer une réservation
 app.post('/api/reservations', authenticateUser, async (req, res) => {
