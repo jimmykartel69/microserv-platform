@@ -1,2 +1,52 @@
-node_modules
-node_modules
+# Dépendances
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Fichiers de configuration IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environnement
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build
+build/
+dist/
+out/
+
+# Fichiers de configuration Firebase
+*.firebaserc
+firebase.json
+firestore.rules
+
+# Fichiers de système
+.DS_Store
+Thumbs.db
+
+# Packages
+*.zip
+*.tar.gz
+
+# Logs
+logs/
+*.log
+
+# Fichiers de package
+package-lock.json
+package.json
+
+# Uploads et fichiers temporaires
+uploads/
+tmp/
+temp/
+
+# Fichiers de configuration spécifiques au projet
+Info\ Projet.txt
+backend/upload_service_image.php
