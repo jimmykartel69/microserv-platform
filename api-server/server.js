@@ -124,7 +124,7 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
     try {
         console.log('🔍 Requête de récupération des réservations');
         console.log('Utilisateur authentifié:', req.user.uid);
-        console.log('Détails de l\'utilisateur authentifié:', req.user);
+        console.log('Paramètres de requête:', req.query);
 
         // Vérifier si la connexion Firestore est établie
         if (!db) {
@@ -136,11 +136,17 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
         }
 
         try {
-            // Récupérer les réservations de l'utilisateur
+            // Construire la requête Firestore
             const reservationsRef = db.collection('reservations');
-            const query = reservationsRef
-                .where('userId', '==', req.user.uid)
-                .orderBy('createdAt', 'desc');  // Trier par date de création décroissante
+            let query = reservationsRef
+                .where('clientId', '==', req.user.uid)
+                .orderBy('createdAt', 'desc');
+
+            // Ajouter un filtre par providerId si fourni
+            if (req.query.providerId) {
+                console.log(`🔎 Filtrage par providerId: ${req.query.providerId}`);
+                query = query.where('providerId', '==', req.query.providerId);
+            }
 
             console.log('Préparation de la requête Firestore');
             const snapshot = await query.get();
@@ -199,29 +205,29 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
 
         } catch (queryError) {
             console.error('❌ Erreur lors de la requête Firestore:', queryError);
-            res.status(500).json({ 
-                success: false, 
-                error: 'Erreur lors de la récupération des réservations',
-                details: process.env.NODE_ENV === 'development' ? queryError.message : undefined
+            
+            // Log détaillé de l'erreur
+            console.error('Détails de l\'erreur:', {
+                name: queryError.name,
+                message: queryError.message,
+                code: queryError.code,
+                stack: queryError.stack
             });
-        }
 
-    } catch (error) {
-        console.error('❌ Erreur globale lors de la récupération des réservations:', error);
-        
-        // Gestion des différents types d'erreurs
-        if (error.code === 'permission-denied') {
-            res.status(403).json({ 
-                success: false, 
-                error: 'Accès non autorisé' 
-            });
-        } else {
-            res.status(500).json({ 
-                success: false, 
-                error: 'Erreur interne du serveur',
-                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            res.status(500).json({
+                success: false,
+                error: 'Erreur lors de la récupération des réservations',
+                details: queryError.message
             });
         }
+    } catch (globalError) {
+        console.error('❌ Erreur globale lors de la récupération des réservations:', globalError);
+        
+        res.status(500).json({
+            success: false,
+            error: 'Erreur interne du serveur',
+            details: globalError.message
+        });
     }
 });
 
