@@ -124,55 +124,90 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
     try {
         console.log('🔍 Requête de récupération des réservations');
         console.log('Utilisateur authentifié:', req.user.uid);
+        console.log('Détails de l\'utilisateur authentifié:', req.user);
 
-        // Récupérer les réservations de l'utilisateur
-        const reservationsRef = db.collection('reservations');
-        const query = reservationsRef
-            .where('userId', '==', req.user.uid)
-            .orderBy('createdAt', 'desc');  // Trier par date de création décroissante
-
-        const snapshot = await query.get();
-
-        // Tableau pour stocker les réservations avec les détails du service
-        const reservations = [];
-
-        // Récupérer les détails de chaque service
-        for (const doc of snapshot.docs) {
-            const reservationData = doc.data();
-            
-            try {
-                // Récupérer les détails du service
-                const serviceRef = db.collection('services').doc(reservationData.serviceId);
-                const serviceDoc = await serviceRef.get();
-
-                // Ajouter les détails du service à la réservation
-                reservations.push({
-                    id: doc.id,
-                    ...reservationData,
-                    service: serviceDoc.exists ? serviceDoc.data() : null
-                });
-            } catch (serviceError) {
-                console.warn(`⚠️ Impossible de récupérer le service pour la réservation ${doc.id}:`, serviceError);
-                
-                // Ajouter la réservation même si le service n'est pas récupéré
-                reservations.push({
-                    id: doc.id,
-                    ...reservationData,
-                    service: null
-                });
-            }
+        // Vérifier si la connexion Firestore est établie
+        if (!db) {
+            console.error('❌ Connexion Firestore non établie');
+            return res.status(500).json({ 
+                success: false, 
+                error: 'Connexion à la base de données impossible' 
+            });
         }
 
-        console.log(`✅ Récupération de ${reservations.length} réservations`);
+        try {
+            // Récupérer les réservations de l'utilisateur
+            const reservationsRef = db.collection('reservations');
+            const query = reservationsRef
+                .where('userId', '==', req.user.uid)
+                .orderBy('createdAt', 'desc');  // Trier par date de création décroissante
 
-        res.status(200).json({
-            success: true,
-            message: 'Réservations récupérées avec succès',
-            reservations: reservations
-        });
+            console.log('Préparation de la requête Firestore');
+            const snapshot = await query.get();
+
+            console.log(`Nombre de documents trouvés: ${snapshot.docs.length}`);
+
+            // Si aucune réservation trouvée
+            if (snapshot.docs.length === 0) {
+                console.log(`🔍 Aucune réservation trouvée pour l'utilisateur ${req.user.uid}`);
+                return res.status(200).json({
+                    success: true,
+                    message: 'Aucune réservation trouvée',
+                    reservations: [],
+                    hasReservations: false
+                });
+            }
+
+            // Tableau pour stocker les réservations avec les détails du service
+            const reservations = [];
+
+            // Récupérer les détails de chaque service
+            for (const doc of snapshot.docs) {
+                const reservationData = doc.data();
+                console.log('Données de réservation:', reservationData);
+                
+                try {
+                    // Récupérer les détails du service
+                    const serviceRef = db.collection('services').doc(reservationData.serviceId);
+                    const serviceDoc = await serviceRef.get();
+
+                    // Ajouter les détails du service à la réservation
+                    reservations.push({
+                        id: doc.id,
+                        ...reservationData,
+                        service: serviceDoc.exists ? serviceDoc.data() : null
+                    });
+                } catch (serviceError) {
+                    console.warn(`⚠️ Impossible de récupérer le service pour la réservation ${doc.id}:`, serviceError);
+                    
+                    // Ajouter la réservation même si le service n'est pas récupéré
+                    reservations.push({
+                        id: doc.id,
+                        ...reservationData,
+                        service: null
+                    });
+                }
+            }
+
+            console.log(`✅ Récupération de ${reservations.length} réservations`);
+
+            res.status(200).json({
+                success: true,
+                message: 'Réservations récupérées avec succès',
+                reservations: reservations
+            });
+
+        } catch (queryError) {
+            console.error('❌ Erreur lors de la requête Firestore:', queryError);
+            res.status(500).json({ 
+                success: false, 
+                error: 'Erreur lors de la récupération des réservations',
+                details: process.env.NODE_ENV === 'development' ? queryError.message : undefined
+            });
+        }
 
     } catch (error) {
-        console.error('❌ Erreur lors de la récupération des réservations:', error);
+        console.error('❌ Erreur globale lors de la récupération des réservations:', error);
         
         // Gestion des différents types d'erreurs
         if (error.code === 'permission-denied') {
