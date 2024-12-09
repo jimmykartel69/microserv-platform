@@ -248,7 +248,7 @@ app.get('/api/reservations', authenticateUser, async (req, res) => {
             details: globalError.message
         });
     }
-};
+});
 
 // Route pour créer une réservation
 app.post('/api/reservations', authenticateUser, async (req, res) => {
